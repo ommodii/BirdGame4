@@ -1,93 +1,75 @@
 using UnityEngine;
 
-// This script controls the bird using physics-based forces.
-// It's designed to be "vibecoded": easy to read and tweak in the Inspector.
 public class BirdPlayer : MonoBehaviour
 {
-    [Header("Movement Settings")]
-    // The constant forward speed of the bird.
-    // Public so you can tweak it in the Inspector to find the right pace.
-    public float forwardSpeed = 10f;
+    [Header("Forward Drive")]
+    public float forwardSpeed = 20f;
+    public float turnSpeed = 150f;
 
-    // How much upward force is applied when holding Space.
-    // Making this public allows for "vibe-checking" the lift feel.
-    public float liftForce = 20f;
+    [Header("Exponential Lift")]
+    public float initialLift = 15f;    // The 'kick' when you first hit space
+    public float liftIncrease = 1.1f;  // How fast the lift grows (exponential)
+    public float maxUpwardSpeed = 25f;
 
-    // How fast the bird turns left and right.
-    // Public to easily adjust responsiveness.
-    public float turnSpeed = 100f;
+    [Header("The Heavy Fall")]
+    public float gravityMultiplier = 4f; // Makes the "Release" feel snappy
 
-    [Header("Components")]
-    // Reference to the Rigidbody component for physics interactions.
-    public Rigidbody rb;
+    private Rigidbody rb;
+    private float currentLiftTimer = 0f;
 
-    // Start is called before the first frame update.
     void Start()
     {
-        // Get the Rigidbody component attached to this GameObject.
-        // We need this to apply physics forces like gravity and lift.
         rb = GetComponent<Rigidbody>();
+        
+        // Setup Rigidbody for "Sharp" feel
+        rb.useGravity = true; 
+        rb.linearDamping = 0.5f;   // Slight air resistance
+        rb.angularDamping = 10f; // Stops spinning the moment you stop turning
     }
 
-    // Update is called once per frame.
-    // We use Update to check for input because it's more responsive than FixedUpdate.
-    void Update()
-    {
-        // We handle input here, but apply physics in FixedUpdate for stability.
-        // This keeps the controls feeling snappy.
-    }
-
-    // FixedUpdate is called at fixed time intervals.
-    // This is where ALL physics calculations (AddForce, Velocity) should happen.
     void FixedUpdate()
     {
-        // --- 1. Forward Motion ---
-        // We want the bird to always move forward relative to where it's facing.
-        // transform.forward gives us the direction the bird is looking.
-        // We multiply by forwardSpeed to set the magnitude.
-        // We preserve the current Y velocity (rb.velocity.y) so gravity and lift still work naturally.
-        Vector3 forwardMove = transform.forward * forwardSpeed;
-        rb.linearVelocity = new Vector3(forwardMove.x, rb.linearVelocity.y, forwardMove.z);
+        // 1. ALWAYS MOVE FORWARD
+        // We use MovePosition for the forward drive so it's unstoppable
+        Vector3 forwardStep = transform.forward * forwardSpeed * Time.fixedDeltaTime;
+        rb.MovePosition(rb.position + forwardStep);
 
-        // --- 2. Ascension (The 'Antigravity' feel) ---
-        // Check if the Space bar is currently being held down.
+        // 2. SNAPPY TURNING
+        float turnInput = Input.GetAxis("Horizontal");
+        if (turnInput != 0)
+        {
+            Quaternion turnRotation = Quaternion.Euler(0f, turnInput * turnSpeed * Time.fixedDeltaTime, 0f);
+            rb.MoveRotation(rb.rotation * turnRotation);
+        }
+
+        // 3. EXPONENTIAL LIFT (Spacebar)
         if (Input.GetKey(KeyCode.Space))
         {
-            // Apply a localized upward force.
-            // Vector3.up is shorthand for (0, 1, 0).
-            // ForceMode.Acceleration ignores mass, giving a consistent "lift" feel regardless of bird size.
-            rb.AddForce(Vector3.up * liftForce, ForceMode.Acceleration);
+            currentLiftTimer += Time.fixedDeltaTime;
+            
+            // Calculate exponential lift: initial + (time squared * growth)
+            float liftEffort = initialLift + (currentLiftTimer * currentLiftTimer * liftIncrease * 50f);
+            liftEffort = Mathf.Min(liftEffort, maxUpwardSpeed);
+
+            // Apply the lift directly to velocity
+            rb.linearVelocity = new Vector3(rb.linearVelocity.x, liftEffort, rb.linearVelocity.z);
         }
-        // If Space is NOT held, we do nothing special.
-        // The Rigidbody's built-in "Use Gravity" setting will naturally pull the bird down.
-
-        // --- 3. Steering ---
-        // Get input from A/D keys or Left/Right arrow keys.
-        // Input.GetAxis("Horizontal") returns:
-        // -1.0 for Left/A
-        // +1.0 for Right/D
-        //  0.0 for no input
-        float turnInput = Input.GetAxis("Horizontal");
-
-        // Calculate the rotation amount based on input, speed, and fixed delta time.
-        // Vector3.up refers to the vertical Y-axis, which we rotate around to turn left/right.
-        Vector3 rotation = Vector3.up * turnInput * turnSpeed * Time.fixedDeltaTime;
-
-        // Apply the rotation to the Rigidbody.
-        // MoveRotation ensures physics don't break when rotating.
-        rb.MoveRotation(rb.rotation * Quaternion.Euler(rotation));
+        else
+        {
+            currentLiftTimer = 0f; // Reset the "engine"
+            
+            // 4. THE HEAVY FALL (Gravity Override)
+            // If we are falling (or just let go), pull down extra hard
+            rb.AddForce(Vector3.down * gravityMultiplier, ForceMode.Acceleration);
+        }
     }
 
-    // This method is automatically called when the Rigidbody hits another Collider.
     private void OnCollisionEnter(Collision collision)
     {
-        // Check if the object we hit has the tag "Enemy".
-        // Tags are efficient ways to group objects in Unity.
         if (collision.gameObject.CompareTag("Enemy"))
         {
-            // If it is an enemy, destroy that game object immediately.
-            // This removes it from the scene effectively "defeating" it.
             Destroy(collision.gameObject);
+            Debug.Log("🎯 Target Eliminated!");
         }
     }
 }
